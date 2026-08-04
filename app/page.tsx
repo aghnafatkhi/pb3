@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Camera, Users, Sparkles, Plus, LogIn, Copy, Check, Heart, RefreshCw, Smartphone, Image as ImageIcon } from 'lucide-react';
 import { RoomState, Participant, FrameThemeId, FrameLayoutId, FilterId } from '@/lib/types';
+import { sounds } from '@/lib/audio';
 import { Navbar } from '@/components/Navbar';
 import { CameraView, CameraViewRef } from '@/components/CameraView';
 import { CountdownOverlay } from '@/components/CountdownOverlay';
@@ -207,9 +208,24 @@ export default function PhotoboothPage() {
 
   // Toggle Ready Status
   const handleToggleReady = async () => {
-    if (!room?.code || !participantId) return;
-    const currentParticipant = participantId === 'p1' ? room.p1 : room.p2;
+    if (!room?.code) return;
+    const pid = participantId || (room.p2 && room.p2.id === 'p2' ? 'p2' : 'p1');
+    const currentParticipant = pid === 'p1' ? room.p1 : room.p2;
     const nextReadyState = !currentParticipant?.isReady;
+
+    sounds.playBeep(600);
+
+    // Immediate optimistic state update
+    setRoom((prev) => {
+      if (!prev) return prev;
+      const updated = { ...prev };
+      if (pid === 'p1' && updated.p1) {
+        updated.p1 = { ...updated.p1, isReady: nextReadyState };
+      } else if (pid === 'p2' && updated.p2) {
+        updated.p2 = { ...updated.p2, isReady: nextReadyState };
+      }
+      return updated;
+    });
 
     try {
       const res = await fetch('/api/room', {
@@ -218,12 +234,12 @@ export default function PhotoboothPage() {
         body: JSON.stringify({
           action: 'set_ready',
           code: room.code,
-          participantId,
+          participantId: pid,
           isReady: nextReadyState,
         }),
       });
       const data = await res.json();
-      if (data.success) {
+      if (data.success && data.room) {
         setRoom(data.room);
       }
     } catch {
@@ -528,25 +544,27 @@ export default function PhotoboothPage() {
             </div>
 
             {/* Big Action Button: Toggle Ready */}
-            <div className="pt-2">
+            <div className="pt-2 flex flex-col gap-2">
               <button
                 onClick={handleToggleReady}
-                disabled={!room.p2}
-                className={`w-full py-4 rounded-3xl font-extrabold text-base sm:text-lg shadow-xl flex items-center justify-center gap-2 transition-all active:scale-98 disabled:opacity-50 ${
+                className={`w-full py-4 rounded-3xl font-extrabold text-base sm:text-lg shadow-xl flex items-center justify-center gap-2 transition-all transform active:scale-95 ${
                   myParticipantObj?.isReady
                     ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-amber-200'
                     : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-200'
                 }`}
               >
-                <Sparkles className="w-5 h-5 animate-spin" />
+                <Sparkles className="w-5 h-5 animate-pulse" />
                 <span>
-                  {!room.p2
-                    ? 'MENUNGGU PESERTA 2...'
-                    : myParticipantObj?.isReady
+                  {myParticipantObj?.isReady
                     ? 'BATALKAN READY (SUDAH READY)'
                     : 'SAYA READY! 📸'}
                 </span>
               </button>
+              {!room.p2 && (
+                <p className="text-center text-xs text-rose-500 font-medium">
+                  💡 Menunggu Peserta 2 bergabung. Kamu tetap bisa menekan <strong>READY</strong> untuk menguji foto!
+                </p>
+              )}
             </div>
           </div>
         )}

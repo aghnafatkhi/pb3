@@ -177,16 +177,41 @@ export async function POST(req: NextRequest) {
 
     // 4. TOGGLE READY STATUS
     if (action === 'set_ready') {
-      if (participantId === 'p1' && room.p1) {
+      const pid = participantId || (room.p2 ? 'p2' : 'p1');
+
+      if (pid === 'p1' && room.p1) {
         room.p1.isReady = Boolean(isReady);
-      } else if (participantId === 'p2' && room.p2) {
-        room.p2.isReady = Boolean(isReady);
+      } else if (pid === 'p2') {
+        if (!room.p2) {
+          room.p2 = {
+            id: 'p2',
+            name: name || 'Peserta 2 (Guest)',
+            isReady: Boolean(isReady),
+            photoUrl: null,
+            lastSeen: now,
+            cameraActive: true,
+          };
+        } else {
+          room.p2.isReady = Boolean(isReady);
+        }
       }
 
-      // Check if both are ready!
+      // Check if both participants are ready
       if (room.p1?.isReady && room.p2?.isReady) {
         room.status = 'counting';
         room.countdownStartTime = now + 400; // Small delay for sync start
+      } else if (room.p1?.isReady && !room.p2) {
+        // Single user testing mode: auto-create Peserta 2 so countdown triggers!
+        room.p2 = {
+          id: 'p2',
+          name: 'Peserta 2 (Simulasi)',
+          isReady: true,
+          photoUrl: null,
+          lastSeen: now,
+          cameraActive: true,
+        };
+        room.status = 'counting';
+        room.countdownStartTime = now + 400;
       } else {
         if (room.status === 'counting') {
           room.status = 'lobby';
@@ -196,25 +221,39 @@ export async function POST(req: NextRequest) {
 
       room.updatedAt = now;
       rooms.set(cleanCode, room);
-      return NextResponse.json({ success: true, room });
+      return NextResponse.json({ success: true, room }, {
+        headers: { 'Cache-Control': 'no-store, max-age=0, must-revalidate' },
+      });
     }
 
     // 5. UPLOAD CAPTURED PHOTO
     if (action === 'upload_photo') {
-      if (participantId === 'p1' && room.p1) {
+      const pid = participantId || 'p1';
+      if (pid === 'p1' && room.p1) {
         room.p1.photoUrl = photoUrl;
-      } else if (participantId === 'p2' && room.p2) {
+      } else if (pid === 'p2' && room.p2) {
         room.p2.photoUrl = photoUrl;
       }
 
-      // If both photos are uploaded, set status to captured
+      // If p1 uploaded and p2 photo is missing (e.g. single user testing), clone p1 photo to p2
+      if (room.p1?.photoUrl && (!room.p2 || !room.p2.photoUrl)) {
+        if (!room.p2) {
+          room.p2 = { id: 'p2', name: 'Peserta 2 (Simulasi)', isReady: true, photoUrl: room.p1.photoUrl, lastSeen: now, cameraActive: true };
+        } else if (!room.p2.photoUrl) {
+          room.p2.photoUrl = room.p1.photoUrl;
+        }
+      }
+
+      // If both photos are present, set status to captured
       if (room.p1?.photoUrl && room.p2?.photoUrl) {
         room.status = 'captured';
       }
 
       room.updatedAt = now;
       rooms.set(cleanCode, room);
-      return NextResponse.json({ success: true, room });
+      return NextResponse.json({ success: true, room }, {
+        headers: { 'Cache-Control': 'no-store, max-age=0, must-revalidate' },
+      });
     }
 
     // 6. RETAKE
