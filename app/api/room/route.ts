@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { RoomState, FrameThemeId, FrameLayoutId, FilterId } from '@/lib/types';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 // In-memory store for active room sessions
 declare global {
   var _roomsMap: Map<string, RoomState> | undefined;
@@ -39,13 +42,16 @@ export async function GET(req: NextRequest) {
   }
 
   const rooms = getRoomsMap();
-  const room = rooms.get(code.trim());
+  const cleanCode = code.trim();
+  const room = rooms.get(cleanCode);
 
   if (!room) {
     return NextResponse.json({ success: false, error: 'Sesi / Kode room tidak ditemukan' }, { status: 404 });
   }
 
-  return NextResponse.json({ success: true, room });
+  return NextResponse.json({ success: true, room }, {
+    headers: { 'Cache-Control': 'no-store, max-age=0, must-revalidate' },
+  });
 }
 
 export async function POST(req: NextRequest) {
@@ -93,29 +99,43 @@ export async function POST(req: NextRequest) {
       };
 
       rooms.set(newCode, newRoom);
-      return NextResponse.json({ success: true, room: newRoom, participantId: 'p1' });
+      return NextResponse.json({ success: true, room: newRoom, participantId: 'p1' }, {
+        headers: { 'Cache-Control': 'no-store, max-age=0, must-revalidate' },
+      });
     }
 
-    // 2. JOIN SESSION
+    // 2. JOIN / RECONNECT SESSION
     if (action === 'join') {
       if (!code) {
         return NextResponse.json({ success: false, error: 'Kode room tidak valid' }, { status: 400 });
       }
 
-      const cleanCode = code.trim();
+      const cleanCode = String(code).trim();
       const room = rooms.get(cleanCode);
 
       if (!room) {
         return NextResponse.json({ success: false, error: 'Sesi tidak ditemukan. Periksa kembali kode room.' }, { status: 404 });
       }
 
-      // Check if p2 exists or if p2 timed out (> 30s)
-      const p2Inactive = room.p2 && (now - room.p2.lastSeen > 30000);
-      
-      if (!room.p2 || p2Inactive || room.p2.id === participantId) {
+      // If client is host reconnecting
+      if (participantId === 'p1') {
+        if (room.p1) {
+          room.p1.lastSeen = now;
+          if (name) room.p1.name = name;
+        }
+        room.updatedAt = now;
+        rooms.set(cleanCode, room);
+        return NextResponse.json({ success: true, room, participantId: 'p1' });
+      }
+
+      // If client is joining as p2 or reconnecting as p2
+      // p2 is available if p2 is null, or inactive (>20s), or if participantId is p2, or room is in lobby
+      const p2Inactive = !room.p2 || (now - room.p2.lastSeen > 20000);
+
+      if (!room.p2 || p2Inactive || participantId === 'p2' || room.status === 'lobby') {
         room.p2 = {
           id: 'p2',
-          name: name || 'Peserta 2 (Guest)',
+          name: name || (room.p2?.name ?? 'Peserta 2 (Guest)'),
           isReady: false,
           photoUrl: null,
           lastSeen: now,
@@ -126,12 +146,8 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: true, room, participantId: 'p2' });
       }
 
-      // If already has both participants and client isn't p1 or p2
-      if (participantId !== 'p1' && participantId !== 'p2') {
-        return NextResponse.json({ success: false, error: 'Sesi ini sudah penuh (maksimal 2 orang)' }, { status: 400 });
-      }
-
-      return NextResponse.json({ success: true, room, participantId });
+      // If room is full and active with other participants
+      return NextResponse.json({ success: true, room, participantId: 'p2' });
     }
 
     // Check existing room

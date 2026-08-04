@@ -28,6 +28,36 @@ export default function PhotoboothPage() {
   const cameraRef = useRef<CameraViewRef | null>(null);
   const isCapturingRef = useRef(false);
 
+  // Restore active room from sessionStorage on initial mount
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const savedCode = sessionStorage.getItem('duobooth_room');
+    const savedPid = sessionStorage.getItem('duobooth_pid') as 'p1' | 'p2' | null;
+
+    if (savedCode && savedPid) {
+      fetch('/api/room', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'join',
+          code: savedCode,
+          participantId: savedPid,
+        }),
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success && data.room) {
+            setRoom(data.room);
+            setParticipantId(data.participantId);
+          } else {
+            sessionStorage.removeItem('duobooth_room');
+            sessionStorage.removeItem('duobooth_pid');
+          }
+        })
+        .catch(() => {});
+    }
+  }, []);
+
   // Sync Room state from API
   const fetchRoomState = useCallback(async (code: string) => {
     try {
@@ -119,6 +149,10 @@ export default function PhotoboothPage() {
       if (data.success) {
         setRoom(data.room);
         setParticipantId('p1');
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem('duobooth_room', data.room.code);
+          sessionStorage.setItem('duobooth_pid', 'p1');
+        }
       } else {
         setErrorMsg(data.error || 'Gagal membuat sesi');
       }
@@ -132,7 +166,8 @@ export default function PhotoboothPage() {
   // Join Room (Guest)
   const handleJoinRoom = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!joinCodeInput.trim()) {
+    const cleanCode = joinCodeInput.trim().toUpperCase();
+    if (!cleanCode) {
       setErrorMsg('Masukkan kode room 6-digit');
       return;
     }
@@ -146,17 +181,22 @@ export default function PhotoboothPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'join',
-          code: joinCodeInput.trim(),
+          code: cleanCode,
           name: userName.trim() || 'Peserta 2 (Guest)',
+          participantId: participantId || undefined,
         }),
       });
       const data = await res.json();
 
-      if (data.success) {
+      if (data.success && data.room) {
         setRoom(data.room);
         setParticipantId(data.participantId);
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem('duobooth_room', data.room.code);
+          sessionStorage.setItem('duobooth_pid', data.participantId);
+        }
       } else {
-        setErrorMsg(data.error || 'Gagal bergabung ke sesi');
+        setErrorMsg(data.error || 'Gagal bergabung ke sesi. Periksa kembali kode room.');
       }
     } catch {
       setErrorMsg('Gagal terhubung ke server');
@@ -245,6 +285,10 @@ export default function PhotoboothPage() {
     setRoom(null);
     setParticipantId(null);
     setErrorMsg(null);
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('duobooth_room');
+      sessionStorage.removeItem('duobooth_pid');
+    }
   };
 
   // Copy Direct Link
