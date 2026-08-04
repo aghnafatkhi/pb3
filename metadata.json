@@ -1,0 +1,10 @@
+{
+  "name": "Photobooth 2 Orang",
+  "description": "Aplikasi photobooth online real-time untuk 2 orang dengan countdown tersinkron dan hasil foto cetak 2R.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
